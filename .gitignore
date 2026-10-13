@@ -6,3 +6,6 @@ __pycache__/
 data/packed_dataset.npz
 data/shards/
 *.log
+sim/sim_*
+*.vcd
+*.vvp
