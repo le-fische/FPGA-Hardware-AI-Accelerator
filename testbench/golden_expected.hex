@@ -1,20 +1,22 @@
-// Testcase 1: Starting Position (4 cp)
+// Testcase 1: Starting Position (1 cp)
+0001
+// Testcase 2: White +Q (283 cp)
+011b
+// Testcase 3: Black +Q (56 cp)
+0038
+// Testcase 4: White +R (117 cp)
+0075
+// Testcase 5: Black +R (44 cp)
+002c
+// Testcase 6: Italian Game (-4 cp)
+fffc
+// Testcase 7: Sicilian Defense (9 cp)
+0009
+// Testcase 8: King + Rook vs King (523 cp)
+020b
+// Testcase 9: Equal Pawn Endgame (-7 cp)
+fff9
+// Testcase 10: Tactical Pin Position (-5 cp)
+fffb
+// Testcase 11: 1. e4 (4 cp)
 0004
-// Testcase 2: White +Q (191 cp)
-00bf
-// Testcase 3: Black +Q (22 cp)
-0016
-// Testcase 4: White +R (69 cp)
-0045
-// Testcase 5: Black +R (-35 cp)
-ffdd
-// Testcase 6: Italian Game (42 cp)
-002a
-// Testcase 7: Sicilian Defense (16 cp)
-0010
-// Testcase 8: King + Rook vs King (257 cp)
-0101
-// Testcase 9: Equal Pawn Endgame (18 cp)
-0012
-// Testcase 10: Tactical Pin Position (-17 cp)
-ffef

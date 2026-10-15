@@ -89,7 +89,33 @@ module nnue_top #(
         .h_out(fc1_h_out)
     );
 
-    // Submodule 3: Dense FC2 Dot Product Engine (32 -> 1)
+    // Material Bucket Classifier:
+    // Bucket 0: Endgame (<= 16 pieces)
+    // Bucket 1: Late Middlegame (17 - 24 pieces)
+    // Bucket 2: Middlegame (25 - 28 pieces)
+    // Bucket 3: Opening (29 - 32 pieces)
+    logic [BUCKET_ADDR_BITS-1:0] derived_bucket;
+    always_comb begin
+        if (num_pieces <= 6'd16)
+            derived_bucket = 2'b00;
+        else if (num_pieces <= 6'd24)
+            derived_bucket = 2'b01;
+        else if (num_pieces <= 6'd28)
+            derived_bucket = 2'b10;
+        else
+            derived_bucket = 2'b11;
+    end
+
+    logic [BUCKET_ADDR_BITS-1:0] current_bucket;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            current_bucket <= 2'b11;
+        end else if (start && !eval_mode) begin
+            current_bucket <= derived_bucket;
+        end
+    end
+
+    // Submodule 3: Dense FC2 Dot Product Engine (32 -> 1 with 4 Material Buckets)
     nnue_fc2_engine #(
         .BIASES_FC2_MEM_FILE(BIASES_FC2_MEM_FILE),
         .WEIGHTS_FC2_MEM_FILE(WEIGHTS_FC2_MEM_FILE)
@@ -98,6 +124,7 @@ module nnue_top #(
         .rst_n(rst_n),
         .start_fc2(start_fc2),
         .fc2_done(fc2_done),
+        .material_bucket(current_bucket),
         .h_in(fc1_h_out),
         .score_out(fc2_score_out)
     );

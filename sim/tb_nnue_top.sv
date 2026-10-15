@@ -62,6 +62,7 @@ module tb_nnue_top;
     logic [9:0] t_idx;
     logic [9:0] o_idx;
     logic signed [15:0] expected_score;
+    logic signed [15:0] diff_expected_score;
 
     // Watchdog Timer (terminate if simulation hangs)
     initial begin
@@ -176,6 +177,13 @@ module tb_nnue_top;
         end
 
         $fclose(stim_file);
+
+        // Read Testcase 11 expected score from exp_file before closing
+        status = $fscanf(exp_file, "%x\n", diff_expected_score);
+        while (status != 1 && !$feof(exp_file)) begin
+            void'($fgets(line, exp_file));
+            status = $fscanf(exp_file, "%x\n", diff_expected_score);
+        end
         $fclose(exp_file);
 
         // -------------------------------------------------------------
@@ -246,11 +254,12 @@ module tb_nnue_top;
         wait(done == 1'b1);
         @(posedge clk);
         
-        if (score === 16'sd10) begin
+        if (score === diff_expected_score) begin
             $display(">>> [PASS] Testcase 11 (Differential): Score = %0d cp (Matched Python bit-for-bit in ~10 us!)", $signed(score));
             total_passed++;
         end else begin
-            $display(">>> [FAIL] Testcase 11 (Differential): Score = %0d cp, Expected = 10 cp", $signed(score));
+            $display(">>> [FAIL] Testcase 11 (Differential): Score = %0d cp, Expected = %0d cp (hex: %04x vs %04x)",
+                     $signed(score), $signed(diff_expected_score), score, diff_expected_score);
             total_failed++;
         end
 

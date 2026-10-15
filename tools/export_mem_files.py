@@ -11,8 +11,12 @@ def export_mem():
     b_acc = np.load(os.path.join(weights_dir, "biases_acc.npy"))   # (256,) int16
     w_fc1 = np.load(os.path.join(weights_dir, "weights_fc1.npy"))  # (32, 512) int8
     b_fc1 = np.load(os.path.join(weights_dir, "biases_fc1.npy"))   # (32,) int32
-    w_fc2 = np.load(os.path.join(weights_dir, "weights_fc2.npy"))  # (1, 32) int8
-    b_fc2 = np.load(os.path.join(weights_dir, "biases_fc2.npy"))   # (1,) int32
+    w_fc2 = np.load(os.path.join(weights_dir, "weights_fc2.npy"))  # (4, 32) int8
+    b_fc2 = np.load(os.path.join(weights_dir, "biases_fc2.npy"))   # (4,) int32
+    if w_fc2.shape[0] == 1 or len(w_fc2.shape) == 1:
+        w_fc2 = np.tile(w_fc2.reshape(1, 32), (4, 1))
+    if b_fc2.size == 1:
+        b_fc2 = np.tile(b_fc2.reshape(1), 4)
     
     # 1. Accumulator Biases: 256 entries of 16-bit
     with open(os.path.join(mem_dir, "biases_acc.mem"), "w") as f:
@@ -40,16 +44,17 @@ def export_mem():
             f.write(f"{int(val) & 0xFFFFFFFF:08x}\n")
     print("Exported mem/biases_fc1.mem (32 words)")
     
-    # 5. FC2 Weights: 32 entries of 8-bit
+    # 5. FC2 Weights: 4 buckets x 32 = 128 entries of 8-bit
     with open(os.path.join(mem_dir, "weights_fc2.mem"), "w") as f:
         for val in w_fc2.flatten():
             f.write(f"{int(val) & 0xFF:02x}\n")
     print(f"Exported mem/weights_fc2.mem ({w_fc2.size:,} bytes)")
     
-    # 6. FC2 Bias: 1 entry of 32-bit
+    # 6. FC2 Biases: 4 entries of 32-bit (one per material bucket)
     with open(os.path.join(mem_dir, "biases_fc2.mem"), "w") as f:
-        f.write(f"{int(b_fc2[0]) & 0xFFFFFFFF:08x}\n")
-    print("Exported mem/biases_fc2.mem (1 word)")
+        for val in b_fc2.flatten():
+            f.write(f"{int(val) & 0xFFFFFFFF:08x}\n")
+    print(f"Exported mem/biases_fc2.mem ({b_fc2.size} words)")
     
     print("\nAll Verilog memory files successfully generated in mem/!")
 

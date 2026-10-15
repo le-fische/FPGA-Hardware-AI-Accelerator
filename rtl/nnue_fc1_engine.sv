@@ -100,11 +100,16 @@ module nnue_fc1_engine #(
                 end
 
                 FINISH: begin
-                    // Arithmetic shift right by 6 and clamp to [0, 127]
+                    // Arithmetic shift right by 6:
+                    // Neurons 0..15: linear Clipped ReLU [0, 127]
+                    // Neurons 16..31: quadratic SqrClippedReLU [0, 127] (paired interaction)
                     for (int j = 0; j < FC1_OUT_DIM; j++) begin
                         logic signed [FC1_ACC_WIDTH-1:0] scaled_val;
                         scaled_val = acc_fc1[j] >>> SHIFT_SCALE;
-                        h_out[j]   <= clip_to_u7(scaled_val);
+                        if (j < 16)
+                            h_out[j] <= clip_to_u7(scaled_val);
+                        else
+                            h_out[j] <= screlu_u7(scaled_val);
                     end
                     fc1_done <= 1'b1;
                     state    <= IDLE;

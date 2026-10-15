@@ -13,8 +13,12 @@ def generate_golden_vectors():
     b_acc = np.load(os.path.join(weights_dir, "biases_acc.npy"))   # (256,) int16
     w_fc1 = np.load(os.path.join(weights_dir, "weights_fc1.npy"))  # (32, 512) int8
     b_fc1 = np.load(os.path.join(weights_dir, "biases_fc1.npy"))   # (32,) int32
-    w_fc2 = np.load(os.path.join(weights_dir, "weights_fc2.npy"))  # (1, 32) int8
-    b_fc2 = np.load(os.path.join(weights_dir, "biases_fc2.npy"))   # (1,) int32
+    w_fc2 = np.load(os.path.join(weights_dir, "weights_fc2.npy"))  # (4, 32) int8
+    b_fc2 = np.load(os.path.join(weights_dir, "biases_fc2.npy"))   # (4,) int32
+    if w_fc2.shape[0] == 1 or len(w_fc2.shape) == 1:
+        w_fc2 = np.tile(w_fc2.reshape(1, 32), (4, 1))
+    if b_fc2.size == 1:
+        b_fc2 = np.tile(b_fc2.reshape(1), 4)
     
     test_cases = [
         {"name": "Starting Position", "fen": chess.STARTING_FEN},
@@ -71,12 +75,24 @@ def generate_golden_vectors():
         clamped_opp = np.clip(acc_opp, 0, 127).astype(np.int32)
         acc_vec = np.concatenate([clamped_turn, clamped_opp]) # 512 bytes
         
-        # 2. Hardware Stage 2: FC1 Matrix Multiply (512 -> 32)
+        # 2. Hardware Stage 2: FC1 Matrix Multiply (512 -> 32) with Hybrid SCReLU
         fc1_sums = b_fc1.astype(np.int64) + np.dot(w_fc1.astype(np.int64), acc_vec.astype(np.int64))
-        h = np.clip(fc1_sums >> 6, 0, 127).astype(np.int32) # 32 bytes
+        scaled_fc1 = fc1_sums >> 6
+        c1 = np.clip(scaled_fc1, 0, 127).astype(np.int32)
+        h_lin = c1[:16]
+        h_sq = np.clip((c1[16:] * c1[16:]) >> 7, 0, 127).astype(np.int32)
+        h = np.concatenate([h_lin, h_sq]) # 32 bytes
         
-        # 3. Hardware Stage 3: FC2 Dot Product (32 -> 1)
-        fc2_sum = b_fc2.astype(np.int64)[0] + np.dot(w_fc2.astype(np.int64)[0], h.astype(np.int64))
+        # 3. Hardware Stage 3: FC2 Dot Product with 4 Material Buckets
+        if n_pieces <= 16:
+            bucket = 0
+        elif n_pieces <= 24:
+            bucket = 1
+        elif n_pieces <= 28:
+            bucket = 2
+        else:
+            bucket = 3
+        fc2_sum = b_fc2.flatten()[bucket].astype(np.int64) + np.dot(w_fc2.reshape(4, 32)[bucket].astype(np.int64), h.astype(np.int64))
         score_cp = int(fc2_sum >> 6) # 16-bit signed integer
         
         # Format Stimulus for Verilog:
@@ -109,6 +125,36 @@ def generate_golden_vectors():
         
         print(f"  [{tc_idx+1:02d}] {tc['name']:<24}: Score = {score_cp:>5d} cp ({score_16b:04x}h), Pieces = {n_pieces}")
         
+    # Testcase 11: 1. e4 (Differential Move Update)
+    b11 = chess.Board()
+    b11.push(chess.Move.from_uci("e2e4"))
+    turn_indices_11 = []
+    opp_indices_11 = []
+    for sq, piece in b11.piece_map().items():
+        pt = piece.piece_type - 1
+        c = 0 if piece.color == chess.WHITE else 1
+        w_idx = c * 384 + pt * 64 + sq
+        b_idx = (c ^ 1) * 384 + pt * 64 + (sq ^ 56)
+        turn_indices_11.append(b_idx)
+        opp_indices_11.append(w_idx)
+        
+    acc_turn_11 = b_acc.astype(np.int32).copy()
+    acc_opp_11 = b_acc.astype(np.int32).copy()
+    for idx in turn_indices_11: acc_turn_11 += w_acc[idx, :]
+    for idx in opp_indices_11: acc_opp_11 += w_acc[idx, :]
+    clamped_turn_11 = np.clip(acc_turn_11, 0, 127).astype(np.int32)
+    clamped_opp_11 = np.clip(acc_opp_11, 0, 127).astype(np.int32)
+    acc_vec_11 = np.concatenate([clamped_turn_11, clamped_opp_11])
+    fc1_sums_11 = b_fc1.astype(np.int64) + np.dot(w_fc1.astype(np.int64), acc_vec_11.astype(np.int64))
+    scaled_fc1_11 = fc1_sums_11 >> 6
+    c1_11 = np.clip(scaled_fc1_11, 0, 127).astype(np.int32)
+    h_11 = np.concatenate([c1_11[:16], np.clip((c1_11[16:] * c1_11[16:]) >> 7, 0, 127).astype(np.int32)])
+    fc2_sum_11 = b_fc2.flatten()[3].astype(np.int64) + np.dot(w_fc2.reshape(4, 32)[3].astype(np.int64), h_11.astype(np.int64))
+    score_cp_11 = int(fc2_sum_11 >> 6)
+    score_16b_11 = score_cp_11 & 0xFFFF
+    exp_file.write(f"// Testcase 11: 1. e4 ({score_cp_11} cp)\n")
+    exp_file.write(f"{score_16b_11:04x}\n")
+
     stim_file.close()
     exp_file.close()
     

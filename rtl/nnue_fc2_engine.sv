@@ -17,15 +17,18 @@ module nnue_fc2_engine #(
     // Hidden Activations from FC1 (32 x 8-bit)
     input  logic [ACTIVATION_WIDTH-1:0]   h_in [0:FC1_OUT_DIM-1],
     
+    // Material Bucket Selection (0=Endgame, 1=Late Mid, 2=Mid, 3=Opening)
+    input  logic [BUCKET_ADDR_BITS-1:0]   material_bucket,
+    
     // Final Centipawn Output
     output logic signed [SCORE_WIDTH-1:0] score_out
 );
 
-    // FC2 Bias: 1 x 32-bit
-    logic signed [FC2_BIAS_WIDTH-1:0]   bias_fc2_mem [0:0];
+    // FC2 Biases: 4 x 32-bit (one per material bucket)
+    logic signed [FC2_BIAS_WIDTH-1:0]   bias_fc2_mem [0:NUM_MATERIAL_BUCKETS-1];
     
-    // FC2 Weights: 32 x 8-bit
-    logic signed [FC2_WEIGHT_WIDTH-1:0] weights_fc2_mem [0:FC1_OUT_DIM-1];
+    // FC2 Weights: 4 buckets x 32 weights = 128 x 8-bit
+    logic signed [FC2_WEIGHT_WIDTH-1:0] weights_fc2_mem [0:(NUM_MATERIAL_BUCKETS*FC1_OUT_DIM)-1];
     
     initial begin
         $readmemh(BIASES_FC2_MEM_FILE, bias_fc2_mem);
@@ -57,12 +60,14 @@ module nnue_fc2_engine #(
                 end
 
                 COMPUTE: begin
-                    // Combinational sum across 32 elements added to bias
+                    // Combinational sum across 32 elements added to bucket bias
                     logic signed [FC2_ACC_WIDTH-1:0] partial_sum;
-                    partial_sum = bias_fc2_mem[0];
+                    partial_sum = bias_fc2_mem[material_bucket];
                     for (int j = 0; j < FC1_OUT_DIM; j++) begin
+                        logic [6:0] w_idx;
                         logic signed [15:0] prod;
-                        prod = $signed({1'b0, h_in[j]}) * weights_fc2_mem[j];
+                        w_idx = {material_bucket, 5'(j)};
+                        prod = $signed({1'b0, h_in[j]}) * weights_fc2_mem[w_idx];
                         partial_sum = partial_sum + 32'(signed'(prod));
                     end
                     total_sum <= partial_sum;
