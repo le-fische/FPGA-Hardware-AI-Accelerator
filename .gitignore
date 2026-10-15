@@ -3,8 +3,8 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
-data/packed_dataset.npz
-data/shards/
+data/
+runs/
 *.log
 sim/sim_*
 *.vcd
