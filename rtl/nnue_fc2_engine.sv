@@ -63,7 +63,7 @@ module nnue_fc2_engine #(
                     for (int j = 0; j < FC1_OUT_DIM; j++) begin
                         logic signed [15:0] prod;
                         prod = $signed({1'b0, h_in[j]}) * weights_fc2_mem[j];
-                        partial_sum = partial_sum + prod;
+                        partial_sum = partial_sum + 32'(signed'(prod));
                     end
                     total_sum <= partial_sum;
                     state     <= FINISH;
@@ -71,7 +71,7 @@ module nnue_fc2_engine #(
 
                 FINISH: begin
                     // Shift right by 6 for centipawn scale
-                    score_out <= total_sum >>> SHIFT_SCALE;
+                    score_out <= 16'(total_sum >>> SHIFT_SCALE);
                     fc2_done  <= 1'b1;
                     state     <= IDLE;
                 end

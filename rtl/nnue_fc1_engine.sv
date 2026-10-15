@@ -86,15 +86,15 @@ module nnue_fc1_engine #(
                         logic signed [FC1_WEIGHT_WIDTH-1:0] w_val;
                         logic signed [15:0] prod;
                         
-                        w_addr = (j * TOTAL_ACC_DIM) + in_counter;
+                        w_addr = 14'(14'(j) * 14'(TOTAL_ACC_DIM) + 14'(in_counter));
                         w_val  = weights_fc1_mem[w_addr];
                         // act_read_data is unsigned [0, 127], w_val is signed 8-bit
                         prod   = $signed({1'b0, act_read_data}) * w_val;
-                        acc_fc1[j] <= acc_fc1[j] + prod;
+                        acc_fc1[j] <= acc_fc1[j] + 32'(signed'(prod));
                     end
 
                     in_counter <= in_counter + 1'b1;
-                    if (in_counter == TOTAL_ACC_DIM - 1) begin
+                    if (in_counter == 9'(TOTAL_ACC_DIM - 1)) begin
                         state <= FINISH;
                     end
                 end

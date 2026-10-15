@@ -16,21 +16,26 @@ module nnue_top #(
     
     // Command Interface
     input  logic                          start,         // Start new position evaluation
+    input  logic                          eval_mode,     // 0 = Full board refresh, 1 = Differential move update
+    input  logic                          swap_turn,     // 1 = Flip side-to-move perspective (differential mode)
     output logic                          ready,         // Accelerator is ready for new position
     output logic                          done,          // Evaluation complete strobe
     output logic signed [SCORE_WIDTH-1:0] score,         // Final evaluation in centipawns
     
-    // Active Pieces Streaming Interface
-    input  logic [5:0]                    num_pieces,    // Total active pieces on board (1..32)
-    input  logic                          piece_valid,   // Valid piece input
+    // Active Pieces / Move Diff Streaming Interface
+    input  logic [5:0]                    num_pieces,    // Total pieces (full mode) or diff count (diff mode)
+    input  logic                          piece_valid,   // Valid piece/diff input
     output logic                          piece_ready,   // Core ready to accept piece
+    input  logic                          piece_remove,  // 0 = Add piece, 1 = Remove piece (differential mode)
     input  logic [FEATURE_ADDR_BITS-1:0]  piece_turn,    // Feature index for turn (0..767)
     input  logic [FEATURE_ADDR_BITS-1:0]  piece_opp      // Feature index for opp (0..767)
 );
 
     // Internal Wires
     logic                          init_acc;
+    logic                          acc_swap_turn;
     logic                          acc_feat_valid;
+    logic                          acc_feat_remove;
     logic [FEATURE_ADDR_BITS-1:0]  acc_feat_turn;
     logic [FEATURE_ADDR_BITS-1:0]  acc_feat_opp;
     logic                          acc_feat_ready;
@@ -41,7 +46,9 @@ module nnue_top #(
     
     logic                          start_fc1;
     logic                          fc1_done;
+    /* verilator lint_off UNUSEDSIGNAL */
     logic                          fc1_busy;
+    /* verilator lint_on UNUSEDSIGNAL */
     logic [ACTIVATION_WIDTH-1:0]   fc1_h_out [0:FC1_OUT_DIM-1];
     
     logic                          start_fc2;
@@ -56,7 +63,9 @@ module nnue_top #(
         .clk(clk),
         .rst_n(rst_n),
         .init_acc(init_acc),
+        .swap_turn(acc_swap_turn),
         .feat_valid(acc_feat_valid),
+        .feat_remove(acc_feat_remove),
         .feat_turn(acc_feat_turn),
         .feat_opp(acc_feat_opp),
         .feat_ready(acc_feat_ready),
@@ -112,6 +121,7 @@ module nnue_top #(
             state                <= ST_IDLE;
             init_acc             <= 1'b0;
             acc_feat_valid       <= 1'b0;
+            acc_feat_remove      <= 1'b0;
             acc_feat_turn        <= '0;
             acc_feat_opp         <= '0;
             start_fc1            <= 1'b0;
@@ -123,6 +133,7 @@ module nnue_top #(
         end else begin
             // Default strobe pulses
             init_acc       <= 1'b0;
+            acc_swap_turn  <= 1'b0;
             acc_feat_valid <= 1'b0;
             start_fc1      <= 1'b0;
             start_fc2      <= 1'b0;
@@ -133,8 +144,14 @@ module nnue_top #(
                     if (start) begin
                         total_pieces_latched <= num_pieces;
                         pieces_loaded        <= '0;
-                        init_acc             <= 1'b1;
-                        state                <= ST_INIT_ACC;
+                        if (eval_mode == 1'b0) begin
+                            init_acc <= 1'b1;
+                            state    <= ST_INIT_ACC;
+                        end else begin
+                            // Differential update: flip perspective if requested
+                            acc_swap_turn <= swap_turn;
+                            state         <= ST_ACC_LOAD;
+                        end
                     end
                 end
 
@@ -148,12 +165,13 @@ module nnue_top #(
                 ST_ACC_LOAD: begin
                     // Stream in active pieces one by one
                     if (piece_valid && acc_feat_ready && !acc_feat_valid) begin
-                        acc_feat_turn  <= piece_turn;
-                        acc_feat_opp   <= piece_opp;
-                        acc_feat_valid <= 1'b1;
-                        pieces_loaded  <= pieces_loaded + 1'b1;
+                        acc_feat_turn   <= piece_turn;
+                        acc_feat_opp    <= piece_opp;
+                        acc_feat_remove <= piece_remove;
+                        acc_feat_valid  <= 1'b1;
+                        pieces_loaded   <= pieces_loaded + 1'b1;
                     end else if (acc_feat_valid) begin
-                        acc_feat_valid <= 1'b0;
+                        acc_feat_valid  <= 1'b0;
                     end
 
                     // Check if all pieces have been accumulated

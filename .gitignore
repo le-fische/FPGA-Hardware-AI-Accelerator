@@ -9,3 +9,6 @@ runs/
 sim/sim_*
 *.vcd
 *.vvp
+sim/*.dylib
+sim/*.so
+sim/verilator_build/

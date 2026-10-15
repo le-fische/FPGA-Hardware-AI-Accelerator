@@ -12,7 +12,9 @@ module nnue_acc_core #(
     
     // Control Handshake
     input  logic                          init_acc,      // Reload biases into accumulator
+    input  logic                          swap_turn,     // Flip perspective pointers when side-to-move changes
     input  logic                          feat_valid,    // Active piece valid
+    input  logic                          feat_remove,   // 0 = add feature, 1 = subtract feature (differential update)
     input  logic [FEATURE_ADDR_BITS-1:0]  feat_turn,     // Feature index for turn (0..767)
     input  logic [FEATURE_ADDR_BITS-1:0]  feat_opp,      // Feature index for opp (0..767)
     output logic                          feat_ready,    // Ready for next piece
@@ -51,30 +53,41 @@ module nnue_acc_core #(
     logic [ACC_ADDR_BITS-1:0] unit_counter;
     logic [FEATURE_ADDR_BITS-1:0] active_turn_latched;
     logic [FEATURE_ADDR_BITS-1:0] active_opp_latched;
+    logic                         active_remove_latched;
+    logic                         perspective_invert;
 
     // Weight BRAM addressing
     logic [17:0] w_turn_addr;
     logic [17:0] w_opp_addr;
-    assign w_turn_addr = (active_turn_latched * ACC_DIM) + unit_counter;
-    assign w_opp_addr  = (active_opp_latched  * ACC_DIM) + unit_counter;
+    assign w_turn_addr = 18'(18'(active_turn_latched) * 18'(ACC_DIM) + 18'(unit_counter));
+    assign w_opp_addr  = 18'(18'(active_opp_latched)  * 18'(ACC_DIM) + 18'(unit_counter));
 
     // FSM Controller
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state               <= IDLE;
-            unit_counter        <= '0;
-            active_turn_latched <= '0;
-            active_opp_latched  <= '0;
+            state                 <= IDLE;
+            unit_counter          <= '0;
+            active_turn_latched   <= '0;
+            active_opp_latched    <= '0;
+            active_remove_latched <= 1'b0;
+            perspective_invert    <= 1'b0;
         end else begin
+            if (init_acc) begin
+                perspective_invert <= 1'b0;
+            end else if (swap_turn) begin
+                perspective_invert <= ~perspective_invert;
+            end
+
             case (state)
                 IDLE: begin
                     unit_counter <= '0;
                     if (init_acc) begin
                         state <= INIT_BIAS;
                     end else if (feat_valid) begin
-                        active_turn_latched <= feat_turn;
-                        active_opp_latched  <= feat_opp;
-                        state               <= ACCUMULATE;
+                        active_turn_latched   <= feat_turn;
+                        active_opp_latched    <= feat_opp;
+                        active_remove_latched <= feat_remove;
+                        state                 <= ACCUMULATE;
                     end
                 end
 
@@ -82,16 +95,31 @@ module nnue_acc_core #(
                     acc_turn[unit_counter] <= biases_mem[unit_counter];
                     acc_opp[unit_counter]  <= biases_mem[unit_counter];
                     unit_counter           <= unit_counter + 1'b1;
-                    if (unit_counter == ACC_DIM - 1) begin
+                    if (unit_counter == 8'(ACC_DIM - 1)) begin
                         state <= IDLE;
                     end
                 end
 
                 ACCUMULATE: begin
-                    acc_turn[unit_counter] <= acc_turn[unit_counter] + weights_mem[w_turn_addr];
-                    acc_opp[unit_counter]  <= acc_opp[unit_counter]  + weights_mem[w_opp_addr];
-                    unit_counter           <= unit_counter + 1'b1;
-                    if (unit_counter == ACC_DIM - 1) begin
+                    if (!perspective_invert) begin
+                        if (active_remove_latched) begin
+                            acc_turn[unit_counter] <= acc_turn[unit_counter] - weights_mem[w_turn_addr];
+                            acc_opp[unit_counter]  <= acc_opp[unit_counter]  - weights_mem[w_opp_addr];
+                        end else begin
+                            acc_turn[unit_counter] <= acc_turn[unit_counter] + weights_mem[w_turn_addr];
+                            acc_opp[unit_counter]  <= acc_opp[unit_counter]  + weights_mem[w_opp_addr];
+                        end
+                    end else begin
+                        if (active_remove_latched) begin
+                            acc_opp[unit_counter]  <= acc_opp[unit_counter]  - weights_mem[w_turn_addr];
+                            acc_turn[unit_counter] <= acc_turn[unit_counter] - weights_mem[w_opp_addr];
+                        end else begin
+                            acc_opp[unit_counter]  <= acc_opp[unit_counter]  + weights_mem[w_turn_addr];
+                            acc_turn[unit_counter] <= acc_turn[unit_counter] + weights_mem[w_opp_addr];
+                        end
+                    end
+                    unit_counter <= unit_counter + 1'b1;
+                    if (unit_counter == 8'(ACC_DIM - 1)) begin
                         state <= IDLE;
                     end
                 end
@@ -107,10 +135,12 @@ module nnue_acc_core #(
     // Activation Readout with Clipped ReLU [0, 127]
     always_comb begin
         logic signed [ACC_VAL_WIDTH-1:0] s_acc;
-        if (act_read_addr < ACC_DIM) begin
-            s_acc = acc_turn[act_read_addr[ACC_ADDR_BITS-1:0]];
+        if (!act_read_addr[ACC_ADDR_BITS]) begin
+            s_acc = (!perspective_invert) ? acc_turn[act_read_addr[ACC_ADDR_BITS-1:0]]
+                                          : acc_opp[act_read_addr[ACC_ADDR_BITS-1:0]];
         end else begin
-            s_acc = acc_opp[act_read_addr - ACC_DIM];
+            s_acc = (!perspective_invert) ? acc_opp[act_read_addr[ACC_ADDR_BITS-1:0]]
+                                          : acc_turn[act_read_addr[ACC_ADDR_BITS-1:0]];
         end
 
         if (s_acc < 0)

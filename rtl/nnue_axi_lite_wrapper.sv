@@ -66,12 +66,15 @@ module nnue_axi_lite_wrapper #(
 
     // DUT Handshake Signals
     logic                          dut_start;
+    logic                          dut_eval_mode;
+    logic                          dut_swap_turn;
     logic                          dut_ready;
     logic                          dut_done;
     logic signed [SCORE_WIDTH-1:0] dut_score;
     logic [5:0]                    dut_num_pieces;
     logic                          dut_piece_valid;
     logic                          dut_piece_ready;
+    logic                          dut_piece_remove;
     logic [FEATURE_ADDR_BITS-1:0]  dut_piece_turn;
     logic [FEATURE_ADDR_BITS-1:0]  dut_piece_opp;
 
@@ -134,16 +137,19 @@ module nnue_axi_lite_wrapper #(
             if (axi_awready && s_axi_awvalid && axi_wready && s_axi_wvalid) begin
                 case (axi_awaddr[5:2])
                     4'h0: begin // 0x00: Control Register
-                        slv_reg_ctrl <= s_axi_wdata;
+                        slv_reg_ctrl  <= s_axi_wdata;
+                        dut_eval_mode <= s_axi_wdata[2];
+                        dut_swap_turn <= s_axi_wdata[3];
                         if (s_axi_wdata[0]) dut_start <= 1'b1;
                     end
                     4'h2: begin // 0x08: Config Register (num_pieces)
                         slv_reg_num_pieces <= s_axi_wdata;
                     end
                     4'h4: begin // 0x10: Piece Write Port
-                        dut_piece_turn  <= s_axi_wdata[FEATURE_ADDR_BITS-1:0];
-                        dut_piece_opp   <= s_axi_wdata[16 +: FEATURE_ADDR_BITS];
-                        dut_piece_valid <= 1'b1;
+                        dut_piece_turn   <= s_axi_wdata[FEATURE_ADDR_BITS-1:0];
+                        dut_piece_opp    <= s_axi_wdata[16 +: FEATURE_ADDR_BITS];
+                        dut_piece_remove <= s_axi_wdata[30];
+                        dut_piece_valid  <= 1'b1;
                     end
                     default: ;
                 endcase
@@ -227,12 +233,15 @@ module nnue_axi_lite_wrapper #(
         .clk(s_axi_aclk),
         .rst_n(s_axi_aresetn),
         .start(dut_start),
+        .eval_mode(dut_eval_mode),
+        .swap_turn(dut_swap_turn),
         .ready(dut_ready),
         .done(dut_done),
         .score(dut_score),
         .num_pieces(dut_num_pieces),
         .piece_valid(dut_piece_valid),
         .piece_ready(dut_piece_ready),
+        .piece_remove(dut_piece_remove),
         .piece_turn(dut_piece_turn),
         .piece_opp(dut_piece_opp)
     );

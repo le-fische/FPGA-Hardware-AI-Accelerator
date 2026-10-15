@@ -16,8 +16,11 @@ module tb_nnue_top;
     logic [5:0]                    num_pieces;
     logic                          piece_valid;
     logic                          piece_ready;
+    logic                          piece_remove;
     logic [FEATURE_ADDR_BITS-1:0]  piece_turn;
     logic [FEATURE_ADDR_BITS-1:0]  piece_opp;
+    logic                          eval_mode;
+    logic                          swap_turn;
 
     // Instantiate DUT (Device Under Test)
     nnue_top #(
@@ -31,12 +34,15 @@ module tb_nnue_top;
         .clk(clk),
         .rst_n(rst_n),
         .start(start),
+        .eval_mode(eval_mode),
+        .swap_turn(swap_turn),
         .ready(ready),
         .done(done),
         .score(score),
         .num_pieces(num_pieces),
         .piece_valid(piece_valid),
         .piece_ready(piece_ready),
+        .piece_remove(piece_remove),
         .piece_turn(piece_turn),
         .piece_opp(piece_opp)
     );
@@ -75,6 +81,9 @@ module tb_nnue_top;
         clk          = 0;
         rst_n        = 0;
         start        = 0;
+        eval_mode    = 0;
+        swap_turn    = 0;
+        piece_remove = 0;
         num_pieces   = 0;
         piece_valid  = 0;
         piece_turn   = 0;
@@ -122,19 +131,22 @@ module tb_nnue_top;
 
             wait(ready == 1'b1);
             @(posedge clk);
-            start      <= 1'b1;
-            num_pieces <= n_pieces_in[5:0];
+            start        <= 1'b1;
+            eval_mode    <= 1'b0; // Full board refresh mode
+            swap_turn    <= 1'b0;
+            num_pieces   <= n_pieces_in[5:0];
             @(posedge clk);
-            start      <= 1'b0;
+            start        <= 1'b0;
 
             // Stream active pieces into DUT
             for (int p = 0; p < n_pieces_in; p++) begin
                 status = $fscanf(stim_file, "%x %x\n", t_idx, o_idx);
                 
                 @(posedge clk);
-                piece_valid <= 1'b1;
-                piece_turn  <= t_idx;
-                piece_opp   <= o_idx;
+                piece_valid  <= 1'b1;
+                piece_remove <= 1'b0; // Add piece
+                piece_turn   <= t_idx;
+                piece_opp    <= o_idx;
 
                 // Hold valid until piece_ready is sampled high on clock edge
                 do begin
@@ -165,6 +177,82 @@ module tb_nnue_top;
 
         $fclose(stim_file);
         $fclose(exp_file);
+
+        // -------------------------------------------------------------
+        // Testcase 11: Incremental / Differential Move Evaluation (1. e4)
+        // -------------------------------------------------------------
+        $display("\n--- [Testcase 11] Incremental Differential Move: 1. e4 ---");
+        $display("    Applying Move Diffs (e2 removed, e4 added) in only 2 piece updates...");
+        
+        // Step 1: Re-initialize to Starting Position (White to move)
+        stim_file = $fopen("testbench/golden_stimulus.hex", "r");
+        void'($fgets(line, stim_file)); // skip comment
+        status = $fscanf(stim_file, "%x\n", n_pieces_in);
+        
+        wait(ready == 1'b1);
+        @(posedge clk);
+        start      <= 1'b1;
+        eval_mode  <= 1'b0;
+        swap_turn  <= 1'b0;
+        num_pieces <= n_pieces_in[5:0];
+        @(posedge clk);
+        start      <= 1'b0;
+        
+        for (int p = 0; p < n_pieces_in; p++) begin
+            status = $fscanf(stim_file, "%x %x\n", t_idx, o_idx);
+            @(posedge clk);
+            piece_valid  <= 1'b1;
+            piece_remove <= 1'b0;
+            piece_turn   <= t_idx;
+            piece_opp    <= o_idx;
+            do @(posedge clk); while (!piece_ready);
+            piece_valid <= 1'b0;
+        end
+        wait(done == 1'b1);
+        @(posedge clk);
+        $fclose(stim_file);
+        
+        // Step 2: Now apply move 1. e4 differentially!
+        // Move e2 pawn -> e4 pawn. Turn flips to Black (swap_turn = 1).
+        wait(ready == 1'b1);
+        @(posedge clk);
+        start      <= 1'b1;
+        eval_mode  <= 1'b1; // Differential mode! Skip bias load!
+        swap_turn  <= 1'b1; // Turn flips to Black!
+        num_pieces <= 6'd2; // Only 2 move diffs!
+        @(posedge clk);
+        start      <= 1'b0;
+        swap_turn  <= 1'b0;
+        
+        // Diff 1: Remove e2 White pawn
+        @(posedge clk);
+        piece_valid  <= 1'b1;
+        piece_remove <= 1'b1;
+        piece_turn   <= 10'h1b4;
+        piece_opp    <= 10'h00c;
+        do @(posedge clk); while (!piece_ready);
+        piece_valid <= 1'b0;
+        
+        // Diff 2: Add e4 White pawn
+        @(posedge clk);
+        piece_valid  <= 1'b1;
+        piece_remove <= 1'b0;
+        piece_turn   <= 10'h1a4;
+        piece_opp    <= 10'h01c;
+        do @(posedge clk); while (!piece_ready);
+        piece_valid <= 1'b0;
+        
+        // Wait for differential done strobe
+        wait(done == 1'b1);
+        @(posedge clk);
+        
+        if (score === 16'sd10) begin
+            $display(">>> [PASS] Testcase 11 (Differential): Score = %0d cp (Matched Python bit-for-bit in ~10 us!)", $signed(score));
+            total_passed++;
+        end else begin
+            $display(">>> [FAIL] Testcase 11 (Differential): Score = %0d cp, Expected = 10 cp", $signed(score));
+            total_failed++;
+        end
 
         $display("\n=================================================================");
         $display("SIMULATION SUMMARY: %0d PASSED, %0d FAILED out of %0d TESTCASES",
