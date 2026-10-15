@@ -81,6 +81,14 @@ def export_fpga_weights(state_dict, output_dir="weights/v2_mlp"):
     else:
         print("  --> Warning: export_mem_files failed:", res.stderr)
 
+    # Regenerate golden vectors for new weights
+    print("[Golden Model] Regenerating golden test vectors for updated model...")
+    res_gold = subprocess.run([sys.executable, "tools/golden_model.py"], capture_output=True, text=True)
+    if res_gold.returncode == 0:
+        print("  --> Golden vectors successfully regenerated.")
+    else:
+        print("  --> Warning: golden_model failed:", res_gold.stderr)
+
     # Run cycle-accurate RTL verification
     print("[RTL Sim] Running cycle-accurate SystemVerilog simulation against benchmark vectors...")
     res_sim = subprocess.run(["make", "sim"], capture_output=True, text=True)
